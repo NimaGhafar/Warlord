@@ -50,6 +50,12 @@ class ActorCritic(nn.Module):
         values    = self.critic(states).squeeze(-1)
         return logprobs, values, entropy
 
+#Random Agent
+class RandomAgent:
+    def act(self, observation):
+        # Return a random action (6 possible in ALE Warlords)
+        return np.random.randint(6)
+
 # PPO-agent
 class PPOAgent:
     def __init__(self, state_dim, action_dim, config: dict):
