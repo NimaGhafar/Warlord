@@ -10,6 +10,7 @@ import yaml
 from src.env.warlords_env import make_env
 from src.agents.agent import PPOAgent
 from src.base.random_policy import RandomPolicy
+from src.utils import device  
 
 
 def main(config_path: str):
@@ -20,7 +21,7 @@ def main(config_path: str):
     # 2. Omgeving initialiseren
     env = make_env(config.get("seed"))
 
-    # Flatten-vector-dimensie (MLP-versie).
+    # Vector-dimensies (MLP-input)
     obs_dim = env.observation_space.shape[0]
     action_dim = env.action_space.n
 
@@ -31,7 +32,6 @@ def main(config_path: str):
     for _ in range(1_000):
         action = baseline.select_action(obs)
         obs, reward, done, info = env.step(action)
-
         if done:
             obs = env.reset()
 
@@ -40,13 +40,13 @@ def main(config_path: str):
 
     obs = env.reset()
     for _ in range(int(config["ppo"]["max_timesteps"])):
-        # a. actie kiezen
+        # a. actie
         action = agent.select_action(obs)
 
         # b. stap in omgeving
         obs, reward, done, info = env.step(action)
 
-        # c. reward + done in buffer
+        # c. reward + done opslaan
         agent.store_reward(reward, done)
 
         # d. episode-einde → policy-update
@@ -56,6 +56,7 @@ def main(config_path: str):
 
     # 5. Model opslaan
     agent.save(config["ppo"]["save_path"])
+
 
 if __name__ == "__main__":
     if len(sys.argv) != 2:

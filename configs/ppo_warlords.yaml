@@ -1,0 +1,14 @@
+# configs/ppo_warlords.yaml
+seed: 42               # reproduceerbaarheid
+
+ppo:
+  # ─── training ─────────────────────────────────────────
+  max_timesteps: 3_000_000     # totaal aantal env-stappen
+  gamma: 0.99                  # discount factor
+  lr: 2.5e-4                   # learning rate
+  eps_clip: 0.1                # PPO clip-epsilon
+  K_epochs: 4                  # gradient‐updates per batch
+
+  # ─── boekhouding / I/O ───────────────────────────────
+  save_path: models/ppo_warlords.pt   # waar het model (.pt) komt
+  log_interval: 10_000                # timesteps tussen console-prints
