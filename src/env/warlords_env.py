@@ -29,7 +29,7 @@ def make_env(seed: Optional[int] = None):
     -------
     gymnasium.Env
     """
-    env = gym.make("ALE/Warlords-v5")
+    env = gym.make("ALE/Warlord-v5")
 
     # Standaard Atari-preprocessing
     env = AtariPreprocessing(
