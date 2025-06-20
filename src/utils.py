@@ -1,27 +1,24 @@
-import os
-import torch
+import random
+import numpy as np
+from collections import deque
 
-def _select_device() -> torch.device:
-    """
-    Kies automatisch het beste beschikbare device.
+class ReplayBuffer:
+    def __init__(self, capacity):
+        self.buffer = deque(maxlen=capacity)
 
-    Prioriteit
-    ----------
-    1. FORCE_DEVICE  –  omgevingsvariabele ('cuda' | 'mps' | 'cpu')
-    2. CUDA          –  NVIDIA-GPU (torch.cuda)
-    3. MPS           –  Apple-GPU   (torch.backends.mps)
-    4. CPU           –  fallback
-    """
-    forced = os.getenv("FORCE_DEVICE")    
-    if forced in {"cuda", "mps", "cpu"}:
-        return torch.device(forced)
+    def push(self, state, action, reward, next_state, done):
+        self.buffer.append((state, action, reward, next_state, done))
 
-    if torch.cuda.is_available():
-        return torch.device("cuda")
+    def sample(self, batch_size):
+        batch = random.sample(self.buffer, batch_size)
+        states, actions, rewards, next_states, dones = zip(*batch)
+        return (
+            np.array(states),
+            np.array(actions),
+            np.array(rewards, dtype=np.float32),
+            np.array(next_states),
+            np.array(dones, dtype=np.uint8)
+        )
 
-    if torch.backends.mps.is_available():
-        return torch.device("mps")
-
-    return torch.device("cpu")
-
-device = _select_device()
+    def __len__(self):
+        return len(self.buffer)
