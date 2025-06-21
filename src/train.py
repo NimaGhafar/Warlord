@@ -1,63 +1,126 @@
+# train.py (gecorrigeerde versie 2)
+
+import gymnasium as gym
+import numpy as np
+import torch
+from collections import defaultdict
 import matplotlib.pyplot as plt
-from ale_py import ALEInterface
-from src.env import SpaceInvadersEnv
-from src.agents import QLearningAgent, RandomAgent
+import supersuit as ss
 
-def train_agent(n_episodes=500, bins=10, use_random=False,
-                alpha=0.1, gamma=0.99, epsilon=1.0,
-                epsilon_decay=0.995, min_epsilon=0.1):
+# Gebruik de basisomgeving van PettingZoo
+from pettingzoo.atari import warlords_v3
+
+# Importeren van onze agenten
+from agents import DQNAgent, RandomAgent
+
+def train_warlords(n_episodes=1000, use_dqn=True, learning_rate=1e-4,
+                   target_update_freq=500, batch_size=32):
     """
-    Train de RL-agent op de SpaceInvaders-omgeving.
-    
-    Parameters:
-        n_episodes: Aantal episodes om te trainen.
-        bins: Aantal bins.
-        use_random: Als True wordt de RandomAgent gebruikt als baseline.
+    Train de MARL-agents op de Warlords-omgeving.
+    """
+    # 1. Omgeving opzetten
+    env = warlords_v3.env(render_mode=None)
+
+    # --- WIJZIGING: Gebruik de correcte, moderne supersuit wrappers ---
+    # De oude 'max_and_skip_v0' is vervangen door een combinatie van
+    # 'max_observation_v0' en 'frame_skip_v0'. Dit is de standaard
+    # aanpak voor Atari-omgevingen.
+
+    # Neem de max over de laatste 2 frames om flikkeren tegen te gaan.
+    env = ss.max_observation_v0(env, 2)
+    # Sla 4 frames over per actie, en sommeer de rewards.
+    env = ss.frame_skip_v0(env, 4)
+
+    # De overige wrappers blijven hetzelfde.
+    env = ss.resize_v1(env, x_size=84, y_size=84)
+    env = ss.frame_stack_v1(env, stack_size=4)
+    env = ss.dtype_v0(env, dtype=np.float32)
+    env = ss.normalize_obs_v0(env, env_min=0, env_max=255)
+    # --------------------------------------------------------------------
+
+    # 2. Agents initialiseren
+    env.reset()
+    agents = {}
+    episode_rewards_history = []
+
+    device = 'cuda' if torch.cuda.is_available() else 'cpu'
+    print(f"Using device: {device}")
+
+    for agent_id in env.possible_agents:
+        obs_space = env.observation_space(agent_id)
+        action_space = env.action_space(agent_id)
         
-    Returns:
-        Een tuple bestaande uit (rewards_per_episode, agent)
-    """
-    env = SpaceInvadersEnv(bins=bins)
-    if use_random:
-        agent = RandomAgent(env.action_space)
-    else:
-        agent = agent = QLearningAgent(
-                env.action_space,
-                state_bins=bins,
-                alpha=alpha,
-                gamma=gamma,
-                epsilon=epsilon,
-                epsilon_decay=epsilon_decay,
-                min_epsilon=min_epsilon
-                )
-    
-    rewards_per_episode = []
+        q_network_obs_shape = obs_space.shape
+        
+        if use_dqn:
+            agents[agent_id] = DQNAgent(
+                action_space=action_space,
+                observation_space=gym.spaces.Box(low=0, high=1, shape=q_network_obs_shape, dtype=np.float32),
+                learning_rate=learning_rate,
+                batch_size=batch_size,
+                device=device
+            )
+        else:
+            agents[agent_id] = RandomAgent(action_space)
 
+    global_step = 0
+
+    # 3. Trainingsloop (deze logica blijft hetzelfde)
     for episode in range(n_episodes):
-        state = env.reset()
-        total_reward = 0
-        done = False
-        while not done:
-            action = agent.choose_action(state)
-            next_state, reward, done, truncated, info = env.step(action)
-            total_reward += reward
-            if not use_random:
-                agent.update(state, action, reward, next_state, done)
-            state = next_state
-        if not use_random:
-            agent.decay_epsilon()
-        rewards_per_episode.append(total_reward)
-        print(f"Episode {episode+1}/{n_episodes}, Total Reward: {total_reward}, Epsilon: {agent.epsilon if not use_random else 'N/A'}")
-    
+        env.reset()
+        episode_rewards = defaultdict(float)
+        
+        previous_states = {}
+        previous_actions = {}
+        
+        for agent_id in env.agent_iter():
+            global_step += 1
+            observation, reward, termination, truncation, info = env.last()
+            done = termination or truncation
+
+            if agent_id in previous_states:
+                prev_obs = previous_states[agent_id]
+                prev_act = previous_actions[agent_id]
+                agents[agent_id].update(prev_obs, prev_act, reward, observation, done)
+                agents[agent_id].learn()
+
+            if done:
+                env.step(None)
+            else:
+                action = agents[agent_id].choose_action(observation)
+                env.step(action)
+                previous_states[agent_id] = observation
+                previous_actions[agent_id] = action
+
+            episode_rewards[agent_id] += reward
+            
+            if use_dqn and global_step % target_update_freq == 0:
+                for agent in agents.values():
+                    if isinstance(agent, DQNAgent):
+                        agent.update_target_network()
+
+        if use_dqn:
+            for agent in agents.values():
+                 if isinstance(agent, DQNAgent):
+                    agent.decay_epsilon()
+        
+        avg_episode_reward = sum(episode_rewards.values()) / len(agents)
+        episode_rewards_history.append(avg_episode_reward)
+
+        current_epsilon = agents[env.possible_agents[0]].epsilon if use_dqn and isinstance(agents[env.possible_agents[0]], DQNAgent) else 'N/A'
+        print(f"Episode {episode + 1}/{n_episodes} | Avg Reward: {avg_episode_reward:.2f} | Epsilon: {current_epsilon if isinstance(current_epsilon, str) else f'{current_epsilon:.4f}'}")
+
     env.close()
-    return rewards_per_episode, agent
+
+    plt.plot(episode_rewards_history)
+    plt.xlabel("Episode")
+    plt.ylabel("Average Total Reward per Agent")
+    plt.title("MARL Training on Warlords")
+    plt.savefig("training_rewards.png")
+    plt.show()
+
+    return agents
 
 if __name__ == "__main__":
-    episodes = 500
-    rewards, agent = train_agent(n_episodes=episodes, bins=10, use_random=False)
-    
-    plt.plot(rewards)
-    plt.xlabel("Episode")
-    plt.ylabel("Total Reward")
-    plt.title("Training Reward per Episode")
-    plt.show()
+    trained_agents = train_warlords(n_episodes=5000, use_dqn=True)
+    print("Training voltooid!")

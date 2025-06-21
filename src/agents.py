@@ -1,97 +1,134 @@
-import random
-import numpy as np
+# agents.py
+
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import numpy as np
+import random
 from utils import ReplayBuffer
-import torch.nn.functional as F
+
+class RandomAgent:
+    """Een agent die willekeurige acties kiest uit de beschikbare actieruimte."""
+    def __init__(self, action_space):
+        self.action_space = action_space
+
+    def choose_action(self, state):
+        return self.action_space.sample()
+
+    # Lege methoden om compatibel te zijn met de trainingsloop
+    def update(self, *args):
+        pass
+
+    def learn(self, *args):
+        pass
 
 
-# --- Agent1: DQN-agent ---
-class DQNNet(nn.Module):
-    def __init__(self, input_shape, n_actions):
-        super().__init__()
-        self.net = nn.Sequential(
-            nn.Flatten(),
-            nn.Linear(input_shape[0]*input_shape[1]*input_shape[2], 256),
+class QNetwork(nn.Module):
+    """
+    Convolutional Neural Network voor het benaderen van Q-waardes uit schermpixels.
+    """
+    def __init__(self, observation_space_shape, action_space_n):
+        super(QNetwork, self).__init__()
+        # Input shape: (in_channels, H, W) -> (4, 84, 84) na preprocessing
+        # We gaan uit van een gestapelde input van 4 frames (gebruikelijk in Atari)
+        self.network = nn.Sequential(
+            nn.Conv2d(observation_space_shape[2], 32, kernel_size=8, stride=4), # H, W, C -> C, H, W
             nn.ReLU(),
-            nn.Linear(256, n_actions)
+            nn.Conv2d(32, 64, kernel_size=4, stride=2),
+            nn.ReLU(),
+            nn.Conv2d(64, 64, kernel_size=3, stride=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(64 * 7 * 7, 512), # De input size hangt af van de output van de conv layers
+            nn.ReLU(),
+            nn.Linear(512, action_space_n)
         )
 
     def forward(self, x):
-        return self.net(x / 255.0)
+        # Permute de dimensies van (N, H, W, C) naar (N, C, H, W) voor PyTorch
+        return self.network(x.permute(0, 3, 1, 2))
 
-class Agent1:
-    def __init__(self, state_shape, n_actions, lr=1e-4, gamma=0.99,
-                 epsilon_start=1.0, epsilon_end=0.1, epsilon_decay=100000):
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.q_net = DQNNet(state_shape, n_actions).to(self.device)
-        self.target_net = DQNNet(state_shape, n_actions).to(self.device)
-        self.optimizer = optim.Adam(self.q_net.parameters(), lr=lr)
-        self.replay_buffer = ReplayBuffer(100000)
+
+class DQNAgent:
+    """Een Deep Q-Learning agent."""
+    def __init__(self, action_space, observation_space,
+                 learning_rate=1e-4,
+                 gamma=0.99,
+                 epsilon=1.0,
+                 epsilon_decay=0.9995,
+                 min_epsilon=0.1,
+                 buffer_size=10000,
+                 batch_size=64,
+                 device='cuda' if torch.cuda.is_available() else 'cpu'):
+
+        self.action_space = action_space
+        self.observation_space = observation_space
         self.gamma = gamma
-        self.epsilon = epsilon_start
-        self.epsilon_min = epsilon_end
+        self.epsilon = epsilon
         self.epsilon_decay = epsilon_decay
-        self.steps_done = 0
+        self.min_epsilon = min_epsilon
+        self.batch_size = batch_size
+        self.device = device
 
-    def select_action(self, state):
-        state_np = np.array(state, copy=False)               # nu écht een ndarray
-        state_v  = torch.from_numpy(state_np)                # tensor dtype float32
-        state_v  = state_v.unsqueeze(0).to(self.device)      # batchdim
+        self.q_network = QNetwork(observation_space.shape, action_space.n).to(self.device)
+        self.target_network = QNetwork(observation_space.shape, action_space.n).to(self.device)
+        self.target_network.load_state_dict(self.q_network.state_dict())
+        self.optimizer = optim.Adam(self.q_network.parameters(), lr=learning_rate)
+        self.loss_fn = nn.MSELoss()
 
-        # Epsilon‑greedy
-        self.steps_done += 1
-        eps_threshold = self.epsilon_min + (self.epsilon - self.epsilon_min) * \
-            np.exp(-1. * self.steps_done / self.epsilon_decay)
+        self.replay_buffer = ReplayBuffer(buffer_size)
 
-        if random.random() < eps_threshold:
-            return random.randrange(self.q_net.net[-1].out_features)
-        with torch.no_grad():
-            q_vals = self.q_net(state_v / 255.0)
-            return int(q_vals.max(1)[1].item())
+    def choose_action(self, state):
+        """Kiest een actie met een epsilon-greedy strategie."""
+        if random.random() < self.epsilon:
+            return self.action_space.sample()
+        else:
+            with torch.no_grad():
+                state_tensor = torch.FloatTensor(np.array(state)).unsqueeze(0).to(self.device)
+                q_values = self.q_network(state_tensor)
+                return q_values.argmax().item()
 
-    def learn(self, batch_size):
-        # 1. Check of er genoeg samples in de buffer staan
-        if len(self.replay_buffer) < batch_size:
+    def update(self, state, action, reward, next_state, done):
+        """Slaat een transitie op in de replay buffer."""
+        self.replay_buffer.push(state, action, reward, next_state, done)
+
+    def learn(self):
+        """
+        Voert een leerstap uit:
+        1. Sample een batch uit de replay buffer.
+        2. Bereken de target Q-waardes.
+        3. Voer een gradient descent stap uit op de Q-network.
+        """
+        if len(self.replay_buffer) < self.batch_size:
             return
 
-        # 2. Sample een batch
-        states, actions, rewards, next_states, dones = self.replay_buffer.sample(batch_size)
+        states, actions, rewards, next_states, dones = self.replay_buffer.sample(self.batch_size)
 
-        # 3. Zet alles om naar PyTorch tensors
-        states_v      = torch.tensor(states,      device=self.device, dtype=torch.float32)
-        actions_v     = torch.tensor(actions,     device=self.device, dtype=torch.int64)
-        rewards_v     = torch.tensor(rewards,     device=self.device, dtype=torch.float32)
-        next_states_v = torch.tensor(next_states, device=self.device, dtype=torch.float32)
-        dones_v       = torch.tensor(dones,       device=self.device, dtype=torch.bool)
+        states = torch.FloatTensor(states).to(self.device)
+        actions = torch.LongTensor(actions).unsqueeze(1).to(self.device)
+        rewards = torch.FloatTensor(rewards).unsqueeze(1).to(self.device)
+        next_states = torch.FloatTensor(next_states).to(self.device)
+        dones = torch.BoolTensor(dones).unsqueeze(1).to(self.device)
 
-        # 4. Bereken current Q(s,a) values
-        #    self.q_net(states_v) geeft (batch_size, n_actions)
-        #    gather haalt de Q-waarde op voor de gekozen acties
-        state_action_values = self.q_net(states_v).gather(
-            1, actions_v.unsqueeze(-1)
-        ).squeeze(-1)
+        # Huidige Q-waardes voor de gekozen acties
+        current_q_values = self.q_network(states).gather(1, actions)
 
-        # 5. Bereken next Q-values via het target network (max_a' Q_target(s',a'))
+        # Target Q-waardes
         with torch.no_grad():
-            next_state_values = self.target_net(next_states_v).max(1)[0]
-            # Zet toekomstige waarden op 0 als de state terminal was
-            next_state_values[dones_v] = 0.0
+            next_q_values = self.target_network(next_states).max(1)[0].unsqueeze(1)
+            # Als de episode is afgelopen (done), is de target enkel de reward
+            target_q_values = rewards + self.gamma * next_q_values * (~dones)
 
-        # 6. Bellman-backup: y = r + γ * max Q_target(s', a')
-        expected_state_action_values = rewards_v + self.gamma * next_state_values
-
-        # 7. Loss berekenen (MSE tussen huidige en verwachte Q-waarden)
-        loss = F.mse_loss(state_action_values, expected_state_action_values)
-
-        # 8. Backpropagation & optimalisatie
+        # Bereken loss en update netwerk
+        loss = self.loss_fn(current_q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
 
-# --- Agent2: random baseline ---
-class Agent2:
-    def act(self, observation):
-        # Return een willekeurige actie (6 mogelijk in ALE Warlords)
-        return np.random.randint(6)
+    def decay_epsilon(self):
+        """Verlaagt epsilon om minder te exploreren naarmate de training vordert."""
+        self.epsilon = max(self.min_epsilon, self.epsilon * self.epsilon_decay)
+    
+    def update_target_network(self):
+        """Kopieert de gewichten van het q_network naar het target_network."""
+        self.target_network.load_state_dict(self.q_network.state_dict())
