@@ -97,23 +97,31 @@ class PPOAgent:
         rewards_to_go = torch.tensor(rewards_to_go, dtype=torch.float32).to(self.device)
         rewards_to_go = (rewards_to_go - rewards_to_go.mean()) / (rewards_to_go.std() + 1e-5)
 
+        # Converteer lijsten naar tensors
         old_states = torch.FloatTensor(np.array(self.memory.states)).to(self.device).detach()
         old_actions = torch.LongTensor(self.memory.actions).to(self.device).detach()
         old_logprobs = torch.FloatTensor(self.memory.logprobs).to(self.device).detach()
 
+        # Optimaliseer de policy voor K epochs
         for _ in range(self.k_epochs):
+            # Evalueer oude acties en waardes
             action_probs, state_values = self.policy(old_states)
             dist = Categorical(action_probs)
             new_logprobs = dist.log_prob(old_actions)
             entropy = dist.entropy()
 
+            # Bereken de ratio (pi_theta / pi_theta_old)
             ratios = torch.exp(new_logprobs - old_logprobs.detach())
 
-            advantages = rewards_to_go - state_values.detach()
+
+            advantages = rewards_to_go - state_values.squeeze().detach()
+
             surr1 = ratios * advantages
             surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
             
+            # Totale loss
             policy_loss = -torch.min(surr1, surr2).mean()
+            # Voor de value loss moet state_values wel [N, 1] zijn.
             value_loss = self.loss_fn(state_values, rewards_to_go.unsqueeze(1))
             entropy_loss = -0.01 * entropy.mean()
             
@@ -123,6 +131,7 @@ class PPOAgent:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-
+        
+        # Kopieer nieuwe gewichten naar het oude policy netwerk
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.memory.clear()
