@@ -14,7 +14,7 @@ pip install -r requirements.txt
 ## Gebruik
 
 1. **Trainen van de PPO Agents**
-   Het trainen van de Random agent gebeurt door het uitvoeren van:
+   Het trainen van de PPO agents gebeurt door het uitvoeren van:
 
    ```python
    trained_agents = train_ppo.train_warlords_ppo(total_timesteps=60_000, update_interval=2048)
