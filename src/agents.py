@@ -39,13 +39,12 @@ class QNetwork(nn.Module):
             nn.Conv2d(64, 64, kernel_size=3, stride=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(64 * 7 * 7, 512), # De input size hangt af van de output van de conv layers
+            nn.Linear(64 * 7 * 7, 512), 
             nn.ReLU(),
             nn.Linear(512, action_space_n)
         )
 
     def forward(self, x):
-        # Permute de dimensies van (N, H, W, C) naar (N, C, H, W) voor PyTorch
         return self.network(x.permute(0, 3, 1, 2))
 
 
@@ -110,16 +109,12 @@ class DQNAgent:
         next_states = torch.FloatTensor(next_states).to(self.device)
         dones = torch.BoolTensor(dones).unsqueeze(1).to(self.device)
 
-        # Huidige Q-waardes voor de gekozen acties
         current_q_values = self.q_network(states).gather(1, actions)
 
-        # Target Q-waardes
         with torch.no_grad():
             next_q_values = self.target_network(next_states).max(1)[0].unsqueeze(1)
-            # Als de episode is afgelopen (done), is de target enkel de reward
             target_q_values = rewards + self.gamma * next_q_values * (~dones)
 
-        # Bereken loss en update netwerk
         loss = self.loss_fn(current_q_values, target_q_values)
         self.optimizer.zero_grad()
         loss.backward()

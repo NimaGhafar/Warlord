@@ -1,4 +1,3 @@
-# replay_buffer.py
 from collections import deque
 import random
 import numpy as np
@@ -8,7 +7,6 @@ class ReplayBuffer:
         self.buffer = deque(maxlen=capacity)
 
     def push(self, state, action, reward, next_state, done):
-        # Converteer naar numpy arrays voor consistentie
         state = np.expand_dims(state, 0)
         next_state = np.expand_dims(next_state, 0)
         self.buffer.append((state, action, reward, next_state, done))

@@ -1,4 +1,3 @@
-# agent_rl.py
 import torch
 import numpy as np
 import random
@@ -17,21 +16,19 @@ class RLAgent:
         self.policy_net = DQN(input_shape, num_actions).to(device)
         self.target_net = DQN(input_shape, num_actions).to(device)
         self.target_net.load_state_dict(self.policy_net.state_dict())
-        self.target_net.eval() # Target net is alleen voor evaluatie
+        self.target_net.eval() 
 
         self.optimizer = torch.optim.Adam(self.policy_net.parameters(), lr=0.0001)
         self.steps_done = 0
 
     def act(self, state, evaluation_mode=False):
         """Kies een actie met epsilon-greedy strategie."""
-        # Epsilon decay
         self.epsilon = self.epsilon_end + (self.epsilon_start - self.epsilon_end) * \
             np.exp(-1. * self.steps_done / self.epsilon_decay)
         self.steps_done += 1
         
         if random.random() > self.epsilon or evaluation_mode:
             with torch.no_grad():
-                # Permute de state van (H, W, C) naar (C, H, W) voor PyTorch
                 state = torch.FloatTensor(state).permute(2, 0, 1).unsqueeze(0).to(self.device)
                 q_values = self.policy_net(state)
                 return q_values.max(1)[1].item()

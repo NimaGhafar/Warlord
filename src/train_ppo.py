@@ -59,10 +59,6 @@ def train_warlords_ppo(total_timesteps=1_000_000, update_interval=2048):
             agents[agent_id].memory.logprobs.append(log_prob)
             
             actions[agent_id] = action
-
-        # Voer stap uit in omgeving (parallel API is makkelijker voor PPO)
-        # We moeten de AEC env converteren naar parallel
-        # Dit is een vereenvoudiging voor de PPO-loop
         
         # De PettingZoo AEC-API step-logica voor PPO
         for agent_id in env.agents:

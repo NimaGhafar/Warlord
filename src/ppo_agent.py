@@ -1,5 +1,3 @@
-# ppo_agent.py
-
 import torch
 import torch.nn as nn
 from torch.distributions import Categorical
@@ -10,7 +8,6 @@ class ActorCritic(nn.Module):
     def __init__(self, observation_space_shape, action_space_n):
         super(ActorCritic, self).__init__()
 
-        # Gedeelde CNN-lagen voor feature extractie uit beelden
         self.cnn_base = nn.Sequential(
             nn.Conv2d(observation_space_shape[2], 32, kernel_size=8, stride=4),
             nn.ReLU(),
@@ -20,13 +17,10 @@ class ActorCritic(nn.Module):
             nn.ReLU(),
             nn.Flatten(),
         )
-        
-        # Bepaal de grootte van de output van de CNN
-        # We doen dit door een dummy tensor door de cnn_base te sturen
+
         dummy_input = torch.zeros(1, *observation_space_shape).permute(0, 3, 1, 2)
         cnn_out_size = self.cnn_base(dummy_input).shape[1]
 
-        # Actor-laag: output is een kansverdeling over de acties
         self.actor = nn.Sequential(
             nn.Linear(cnn_out_size, 512),
             nn.ReLU(),
@@ -34,7 +28,6 @@ class ActorCritic(nn.Module):
             nn.Softmax(dim=-1)
         )
 
-        # Critic-laag: output is een enkele waarde die de staat evalueert
         self.critic = nn.Sequential(
             nn.Linear(cnn_out_size, 512),
             nn.ReLU(),
@@ -42,7 +35,6 @@ class ActorCritic(nn.Module):
         )
 
     def forward(self, state):
-        # Permute de dimensies van (N, H, W, C) naar (N, C, H, W) voor PyTorch
         state = state.permute(0, 3, 1, 2)
         features = self.cnn_base(state)
         action_probs = self.actor(features)
@@ -94,7 +86,6 @@ class PPOAgent:
         return action.item(), log_prob.item()
 
     def update(self):
-        # Monte Carlo schatting van de rewards-to-go
         rewards_to_go = []
         discounted_reward = 0
         for reward, done in zip(reversed(self.memory.rewards), reversed(self.memory.dones)):
@@ -106,28 +97,22 @@ class PPOAgent:
         rewards_to_go = torch.tensor(rewards_to_go, dtype=torch.float32).to(self.device)
         rewards_to_go = (rewards_to_go - rewards_to_go.mean()) / (rewards_to_go.std() + 1e-5)
 
-        # Converteer lijsten naar tensors
         old_states = torch.FloatTensor(np.array(self.memory.states)).to(self.device).detach()
         old_actions = torch.LongTensor(self.memory.actions).to(self.device).detach()
         old_logprobs = torch.FloatTensor(self.memory.logprobs).to(self.device).detach()
 
-        # Optimaliseer de policy voor K epochs
         for _ in range(self.k_epochs):
-            # Evalueer oude acties en waardes
             action_probs, state_values = self.policy(old_states)
             dist = Categorical(action_probs)
             new_logprobs = dist.log_prob(old_actions)
             entropy = dist.entropy()
 
-            # Bereken de ratio (pi_theta / pi_theta_old)
             ratios = torch.exp(new_logprobs - old_logprobs.detach())
 
-            # Bereken de surrogate loss
             advantages = rewards_to_go - state_values.detach()
             surr1 = ratios * advantages
             surr2 = torch.clamp(ratios, 1-self.eps_clip, 1+self.eps_clip) * advantages
             
-            # Totale loss = Policy loss + Value loss + Entropy bonus
             policy_loss = -torch.min(surr1, surr2).mean()
             value_loss = self.loss_fn(state_values, rewards_to_go.unsqueeze(1))
             entropy_loss = -0.01 * entropy.mean()
@@ -138,7 +123,6 @@ class PPOAgent:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
-        
-        # Kopieer nieuwe gewichten naar het oude policy netwerk
+
         self.policy_old.load_state_dict(self.policy.state_dict())
         self.memory.clear()

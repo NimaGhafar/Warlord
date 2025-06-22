@@ -1,5 +1,3 @@
-# train.py (gecorrigeerde versie 2)
-
 import gymnasium as gym
 import numpy as np
 import torch
@@ -7,10 +5,8 @@ from collections import defaultdict
 import matplotlib.pyplot as plt
 import supersuit as ss
 
-# Gebruik de basisomgeving van PettingZoo
 from pettingzoo.atari import warlords_v3
 
-# Importeren van onze agenten
 from agents import DQNAgent, RandomAgent
 
 def train_warlords(n_episodes=1000, use_dqn=True, learning_rate=1e-4,
@@ -21,22 +17,14 @@ def train_warlords(n_episodes=1000, use_dqn=True, learning_rate=1e-4,
     # 1. Omgeving opzetten
     env = warlords_v3.env(render_mode=None)
 
-    # --- WIJZIGING: Gebruik de correcte, moderne supersuit wrappers ---
-    # De oude 'max_and_skip_v0' is vervangen door een combinatie van
-    # 'max_observation_v0' en 'frame_skip_v0'. Dit is de standaard
-    # aanpak voor Atari-omgevingen.
-
-    # Neem de max over de laatste 2 frames om flikkeren tegen te gaan.
     env = ss.max_observation_v0(env, 2)
-    # Sla 4 frames over per actie, en sommeer de rewards.
+
     env = ss.frame_skip_v0(env, 4)
 
-    # De overige wrappers blijven hetzelfde.
     env = ss.resize_v1(env, x_size=84, y_size=84)
     env = ss.frame_stack_v1(env, stack_size=4)
     env = ss.dtype_v0(env, dtype=np.float32)
     env = ss.normalize_obs_v0(env, env_min=0, env_max=255)
-    # --------------------------------------------------------------------
 
     # 2. Agents initialiseren
     env.reset()
@@ -65,7 +53,6 @@ def train_warlords(n_episodes=1000, use_dqn=True, learning_rate=1e-4,
 
     global_step = 0
 
-    # 3. Trainingsloop (deze logica blijft hetzelfde)
     for episode in range(n_episodes):
         env.reset()
         episode_rewards = defaultdict(float)
